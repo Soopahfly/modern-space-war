@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Modern Space War</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="game-stage" aria-label="Modern Space War">
+        <canvas id="game" width="1280" height="800"></canvas>
+        <div class="hud hud-top">
+          <div class="brand">SPACE WAR</div>
+          <div id="roundState" class="status">READY</div>
+          <button id="pauseButton" type="button" title="Pause or resume">II</button>
+        </div>
+        <div id="scoreboard" class="scoreboard" aria-live="polite"></div>
+        <dialog id="setupDialog" class="setup">
+          <form method="dialog">
+            <h1>SPACE WAR</h1>
+            <label>
+              <span>Players</span>
+              <input id="playerCount" type="range" min="2" max="6" value="4">
+              <output id="playerCountOut">4</output>
+            </label>
+            <label>
+              <span>Star</span>
+              <input id="gravity" type="range" min="0" max="100" value="62">
+              <output id="gravityOut">62</output>
+            </label>
+            <label>
+              <span>Rounds</span>
+              <input id="scoreLimit" type="number" min="1" max="25" value="7">
+            </label>
+            <label>
+              <span>Mode</span>
+              <select id="gameMode">
+                <option value="free">Free-for-all</option>
+                <option value="teams">Teams</option>
+                <option value="bounty">Bounty</option>
+                <option value="king">Gravity king</option>
+              </select>
+            </label>
+            <label>
+              <span>Orbit</span>
+              <select id="orbitMode">
+                <option value="mid">Mid</option>
+                <option value="close">Close</option>
+                <option value="far">Far</option>
+                <option value="mixed">Mixed</option>
+              </select>
+            </label>
+            <div class="toggle-grid" aria-label="Mutators">
+              <label><input id="fuelMode" type="checkbox"> Fuel</label>
+              <label><input id="debrisMode" type="checkbox"> Debris</label>
+              <label><input id="moonMode" type="checkbox"> Moons</label>
+              <label><input id="cometMode" type="checkbox"> Comet</label>
+              <label><input id="variantMode" type="checkbox"> Variants</label>
+            </div>
+            <div class="control-grid">
+              <div>P1 A D W S</div>
+              <div>P2 J L I K</div>
+              <div>P3 F H T G</div>
+              <div>P4 LEFT RIGHT UP DOWN</div>
+              <div>P5 Num4 Num6 Num8 Num5</div>
+              <div>P6 V N Y B</div>
+            </div>
+            <button id="startButton" value="start" type="submit">START</button>
+          </form>
+        </dialog>
+      </section>
+    </main>
+    <script src="game.js"></script>
+  </body>
+</html>
