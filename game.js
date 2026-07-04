@@ -18,6 +18,16 @@ const debrisMode = document.getElementById("debrisMode");
 const moonMode = document.getElementById("moonMode");
 const cometMode = document.getElementById("cometMode");
 const variantMode = document.getElementById("variantMode");
+const soundMode = document.getElementById("soundMode");
+const attractMode = document.getElementById("attractMode");
+const turnTune = document.getElementById("turnTune");
+const turnTuneOut = document.getElementById("turnTuneOut");
+const thrustTune = document.getElementById("thrustTune");
+const thrustTuneOut = document.getElementById("thrustTuneOut");
+const shotTune = document.getElementById("shotTune");
+const shotTuneOut = document.getElementById("shotTuneOut");
+const botCount = document.getElementById("botCount");
+const botCountOut = document.getElementById("botCountOut");
 const roomCode = document.getElementById("roomCode");
 const hostRoom = document.getElementById("hostRoom");
 const joinRoom = document.getElementById("joinRoom");
@@ -27,6 +37,12 @@ const controlEditor = document.getElementById("controlEditor");
 const gamepadEditor = document.getElementById("gamepadEditor");
 const gamepadStatus = document.getElementById("gamepadStatus");
 const mouseEditor = document.getElementById("mouseEditor");
+const saveProfile = document.getElementById("saveProfile");
+const loadProfile = document.getElementById("loadProfile");
+const joinByInput = document.getElementById("joinByInput");
+const connectHid = document.getElementById("connectHid");
+const inputStatus = document.getElementById("inputStatus");
+const touchControls = document.getElementById("touchControls");
 const resetControls = document.getElementById("resetControls");
 
 const TAU = Math.PI * 2;
@@ -100,6 +116,17 @@ let onlinePlayer = 0;
 let socket = null;
 let remoteInputs = Array.from({ length: 6 }, () => blankInput());
 let lastSnapshotAt = 0;
+let joinInputMode = false;
+let touchState = blankInput();
+let botPlayers = new Set();
+let botInputs = Array.from({ length: 6 }, () => blankInput());
+let hidDevice = null;
+let hidPlayer = 0;
+let hidTurn = 0;
+let hidButtons = 0;
+let audioContext = null;
+let attractTimer = 0;
+let thrustSoundTimer = 0;
 
 function blankInput() {
   return { left: false, right: false, thrust: false, fire: false, mouseTurn: 0 };
@@ -131,7 +158,13 @@ function readOptions() {
     debris: debrisMode.checked,
     moons: moonMode.checked,
     comet: cometMode.checked,
-    variants: variantMode.checked
+    variants: variantMode.checked,
+    sound: soundMode.checked,
+    attract: attractMode.checked,
+    turnTune: Number(turnTune.value) / 100,
+    thrustTune: Number(thrustTune.value) / 100,
+    shotTune: Number(shotTune.value) / 100,
+    bots: Number(botCount.value)
   };
 }
 
@@ -142,6 +175,7 @@ function resetMatch() {
   STAR.gravity = Number(gravity.value) * 1450;
   teamScores = [0, 0];
   players = Array.from({ length: count }, (_, i) => makePlayer(i, count));
+  configureBots(count);
   shots = [];
   sparks = [];
   debris = [];
@@ -155,7 +189,15 @@ function resetMatch() {
   paused = false;
   pauseButton.textContent = "II";
   renderScores();
+  playTone(150, 0.05, 0.04);
   if (mousePlayer !== null && canvas.requestPointerLock) canvas.requestPointerLock();
+}
+
+function configureBots(count) {
+  botPlayers = new Set();
+  const bots = clamp(options.bots || 0, 0, Math.max(0, count - 1));
+  for (let i = count - bots; i < count; i++) botPlayers.add(i);
+  botInputs = Array.from({ length: 6 }, () => blankInput());
 }
 
 function makePlayer(index, count) {
@@ -342,10 +384,15 @@ function readPadInput(player, action) {
 
 function localActionActive(player, action) {
   const controls = controlSets[player];
-  return keys.has(controls[action]) || readPadInput(player, action) || readMouseInput(player, action);
+  return keys.has(controls[action]) ||
+    readPadInput(player, action) ||
+    readMouseInput(player, action) ||
+    readTouchInput(player, action) ||
+    readHidInput(player, action);
 }
 
 function actionActive(player, action) {
+  if (botPlayers.has(player)) return Boolean(botInputs[player] && botInputs[player][action]);
   if (onlineRole === "host" && player !== 0) return Boolean(remoteInputs[player] && remoteInputs[player][action]);
   return localActionActive(player, action);
 }
@@ -370,6 +417,11 @@ function findActiveGamepad() {
 }
 
 function processGamepadAssignment() {
+  if (joinInputMode) {
+    const joined = findActiveGamepad();
+    if (joined !== null) claimNextPlayer("pad", joined);
+    return;
+  }
   if (pendingPadBind === null) return;
   const index = findActiveGamepad();
   if (index === null) return;
@@ -377,6 +429,24 @@ function processGamepadAssignment() {
   playerPads[pendingPadBind] = index;
   pendingPadBind = null;
   renderGamepadEditor();
+}
+
+async function connectWebHid() {
+  if (!navigator.hid) {
+    inputStatus.textContent = "WebHID unavailable in this browser";
+    return;
+  }
+  const devices = await navigator.hid.requestDevice({ filters: [] });
+  if (!devices.length) return;
+  hidDevice = devices[0];
+  await hidDevice.open();
+  hidDevice.addEventListener("inputreport", (event) => {
+    const bytes = new Uint8Array(event.data.buffer);
+    hidTurn = bytes.length ? (bytes[0] << 24) >> 24 : 0;
+    hidButtons = bytes.length > 1 ? bytes[1] : 0;
+  });
+  hidPlayer = 0;
+  inputStatus.textContent = `WebHID ${hidDevice.productName || "device"} on P1`;
 }
 
 function renderMouseEditor() {
@@ -397,6 +467,174 @@ function readMouseInput(player, action) {
   if (action === "thrust") return Boolean(mouseButtons & 1);
   if (action === "fire") return Boolean(mouseButtons & 2);
   return false;
+}
+
+function readTouchInput(player, action) {
+  return player === 0 && Boolean(touchState[action]);
+}
+
+function readHidInput(player, action) {
+  if (!hidDevice || player !== hidPlayer) return false;
+  if (action === "left") return hidTurn < -1;
+  if (action === "right") return hidTurn > 1;
+  if (action === "thrust") return Boolean(hidButtons & 1);
+  if (action === "fire") return Boolean(hidButtons & 2);
+  return false;
+}
+
+function updateBots() {
+  if (!botPlayers.size) return;
+  for (const id of botPlayers) {
+    const bot = players[id];
+    if (!bot || !bot.alive) {
+      botInputs[id] = blankInput();
+      continue;
+    }
+    const target = nearestEnemy(bot);
+    if (!target) {
+      botInputs[id] = blankInput();
+      continue;
+    }
+    const dx = shortestDelta(target.x - bot.x, WORLD.w);
+    const dy = shortestDelta(target.y - bot.y, WORLD.h);
+    const desired = Math.atan2(dy, dx);
+    const turn = normalizeAngle(desired - bot.angle);
+    const d = Math.sqrt(dx * dx + dy * dy);
+    const starD = distance(bot, STAR);
+    botInputs[id] = {
+      left: turn < -0.12,
+      right: turn > 0.12,
+      thrust: Math.abs(turn) < 0.9 && (d > 170 || starD < 130),
+      fire: Math.abs(turn) < 0.18 && d < 520,
+      mouseTurn: 0
+    };
+  }
+}
+
+function updateAttract(dt) {
+  if (started || !attractMode.checked || dialog.open === false) {
+    attractTimer = 0;
+    return;
+  }
+  attractTimer += dt;
+  if (attractTimer < 4) return;
+  options = readOptions();
+  options.bots = Math.max(2, options.bots || 4);
+  playerCount.value = String(Math.max(Number(playerCount.value), options.bots));
+  playerCountOut.value = playerCount.value;
+  targetScore = 7;
+  STAR.gravity = Number(gravity.value) * 1450;
+  teamScores = [0, 0];
+  players = Array.from({ length: Number(playerCount.value) }, (_, i) => makePlayer(i, Number(playerCount.value)));
+  configureBots(players.length);
+  shots = [];
+  sparks = [];
+  debris = [];
+  comet = null;
+  setupMoons();
+  started = true;
+  betweenRounds = false;
+  stateNode.textContent = "DEMO";
+}
+
+function nearestEnemy(player) {
+  let best = null;
+  let bestD = Infinity;
+  for (const candidate of players) {
+    if (!candidate.alive || candidate.id === player.id || sameTeam(candidate.id, player.id)) continue;
+    const d = distance(player, candidate);
+    if (d < bestD) {
+      best = candidate;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+function shortestDelta(value, size) {
+  if (value > size / 2) return value - size;
+  if (value < -size / 2) return value + size;
+  return value;
+}
+
+function normalizeAngle(value) {
+  while (value > Math.PI) value -= TAU;
+  while (value < -Math.PI) value += TAU;
+  return value;
+}
+
+function playTone(frequency, duration, volume = 0.035) {
+  if (!options.sound && !soundMode.checked) return;
+  if (!audioContext) audioContext = new AudioContext();
+  const now = audioContext.currentTime;
+  const oscillator = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  oscillator.type = "square";
+  oscillator.frequency.setValueAtTime(frequency, now);
+  gain.gain.setValueAtTime(volume, now);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+  oscillator.connect(gain).connect(audioContext.destination);
+  oscillator.start(now);
+  oscillator.stop(now + duration);
+}
+
+function saveControlProfile() {
+  const profile = {
+    controlSets,
+    playerPads,
+    mousePlayer,
+    turnTune: turnTune.value,
+    thrustTune: thrustTune.value,
+    shotTune: shotTune.value,
+    botCount: botCount.value
+  };
+  localStorage.setItem("modernSpaceWar.profile", JSON.stringify(profile));
+  inputStatus.textContent = "Profile saved";
+}
+
+function loadControlProfile() {
+  const raw = localStorage.getItem("modernSpaceWar.profile");
+  if (!raw) {
+    inputStatus.textContent = "No saved profile";
+    return;
+  }
+  const profile = JSON.parse(raw);
+  controlSets = cloneControlSets(profile.controlSets || defaultControlSets);
+  playerPads = profile.playerPads || Array(6).fill(null);
+  mousePlayer = profile.mousePlayer ?? null;
+  turnTune.value = profile.turnTune || "100";
+  thrustTune.value = profile.thrustTune || "100";
+  shotTune.value = profile.shotTune || "100";
+  botCount.value = profile.botCount || "0";
+  updateTuneOutputs();
+  renderControlEditor();
+  renderGamepadEditor();
+  renderMouseEditor();
+  inputStatus.textContent = "Profile loaded";
+}
+
+function claimNextPlayer(kind, value) {
+  const next = Math.min(Number(playerCount.value), 5);
+  playerCount.value = String(Math.max(Number(playerCount.value), next + 1));
+  playerCountOut.value = playerCount.value;
+  if (kind === "pad") {
+    playerPads = playerPads.map((item) => item === value ? null : item);
+    playerPads[next] = value;
+  }
+  if (kind === "mouse") mousePlayer = next;
+  if (kind === "key") controlSets[next] = { ...defaultControlSets[next] };
+  joinInputMode = false;
+  inputStatus.textContent = `P${next + 1} joined by ${kind}`;
+  renderControlEditor();
+  renderGamepadEditor();
+  renderMouseEditor();
+}
+
+function updateTuneOutputs() {
+  turnTuneOut.value = turnTune.value;
+  thrustTuneOut.value = thrustTune.value;
+  shotTuneOut.value = shotTune.value;
+  botCountOut.value = botCount.value;
 }
 
 function connectOnline(kind) {
@@ -536,6 +774,7 @@ function applySnapshot(state) {
 function update(dt) {
   publishOnline(dt);
   if (onlineRole === "client") return;
+  updateAttract(dt);
   if (!started) {
     stateNode.textContent = "READY";
     return;
@@ -552,6 +791,7 @@ function update(dt) {
   }
 
   stateNode.textContent = modeLabel();
+  updateBots();
   updateMoons(dt);
   updateComet(dt);
   for (const p of players) updatePlayer(p, dt);
@@ -574,17 +814,17 @@ function modeLabel() {
 function updatePlayer(p, dt) {
   if (!p.alive) return;
   if (mousePlayer === p.id && document.pointerLockElement === canvas) {
-    p.angle += mouseTurn * 0.014 * p.trait.turn;
+    p.angle += mouseTurn * 0.014 * p.trait.turn * options.turnTune;
   }
   if (onlineRole === "host" && p.id !== 0 && remoteInputs[p.id]) {
-    p.angle += remoteInputs[p.id].mouseTurn * 0.014 * p.trait.turn;
+    p.angle += remoteInputs[p.id].mouseTurn * 0.014 * p.trait.turn * options.turnTune;
     remoteInputs[p.id].mouseTurn = 0;
   }
-  if (actionActive(p.id, "left")) p.angle -= 4.25 * p.trait.turn * dt;
-  if (actionActive(p.id, "right")) p.angle += 4.25 * p.trait.turn * dt;
+  if (actionActive(p.id, "left")) p.angle -= 4.25 * p.trait.turn * options.turnTune * dt;
+  if (actionActive(p.id, "right")) p.angle += 4.25 * p.trait.turn * options.turnTune * dt;
   if (actionActive(p.id, "thrust") && (!options.fuel || p.fuel > 0)) {
-    p.vx += Math.cos(p.angle) * 235 * p.trait.thrust * dt;
-    p.vy += Math.sin(p.angle) * 235 * p.trait.thrust * dt;
+    p.vx += Math.cos(p.angle) * 235 * p.trait.thrust * options.thrustTune * dt;
+    p.vy += Math.sin(p.angle) * 235 * p.trait.thrust * options.thrustTune * dt;
     p.fuel = Math.max(0, p.fuel - 18 * dt);
     makeThrust(p);
   }
@@ -757,7 +997,7 @@ function matchWinnerText() {
 }
 
 function fire(p) {
-  const speed = 430 * p.trait.shot;
+  const speed = 430 * p.trait.shot * options.shotTune;
   shots.push({
     x: p.x + Math.cos(p.angle) * 18,
     y: p.y + Math.sin(p.angle) * 18,
@@ -767,12 +1007,14 @@ function fire(p) {
     owner: p.id
   });
   p.cool = 0.28 * p.trait.cool;
+  playTone(620, 0.045, 0.028);
 }
 
 function destroyShip(p, scorerId = null) {
   if (!p.alive) return;
   p.alive = false;
   burst(p.x, p.y, 24);
+  playTone(80, 0.16, 0.055);
   if (options.debris) makeDebris(p);
   if (scorerId !== null && players[scorerId]) {
     let points = 1;
@@ -827,6 +1069,11 @@ function makeDebris(p) {
 
 function makeThrust(p) {
   if (Math.random() > 0.6) return;
+  thrustSoundTimer -= 0.016;
+  if (thrustSoundTimer <= 0) {
+    thrustSoundTimer = 0.12;
+    playTone(115, 0.035, 0.018);
+  }
   const a = p.angle + Math.PI + (Math.random() - 0.5) * 0.5;
   sparks.push({
     x: p.x - Math.cos(p.angle) * 12,
@@ -1060,6 +1307,11 @@ function resizeCanvas() {
 }
 
 window.addEventListener("keydown", (event) => {
+  if (joinInputMode && !["Enter", "Space", "Tab", "Escape"].includes(event.code)) {
+    event.preventDefault();
+    claimNextPlayer("key", event.code);
+    return;
+  }
   if (pendingPadBind !== null && event.code === "Escape") {
     event.preventDefault();
     pendingPadBind = null;
@@ -1122,6 +1374,20 @@ mouseEditor.addEventListener("click", (event) => {
   renderMouseEditor();
 });
 
+saveProfile.addEventListener("click", saveControlProfile);
+loadProfile.addEventListener("click", loadControlProfile);
+
+joinByInput.addEventListener("click", () => {
+  joinInputMode = !joinInputMode;
+  inputStatus.textContent = joinInputMode ? "Press a key, pad button, or mouse button" : "Join-by-input off";
+});
+
+connectHid.addEventListener("click", () => {
+  connectWebHid().catch(() => {
+    inputStatus.textContent = "WebHID connection failed";
+  });
+});
+
 hostRoom.addEventListener("click", () => {
   connectOnline("host");
 });
@@ -1167,6 +1433,30 @@ gravity.addEventListener("input", () => {
   gravityOut.value = gravity.value;
 });
 
+for (const input of [turnTune, thrustTune, shotTune, botCount]) {
+  input.addEventListener("input", updateTuneOutputs);
+}
+
+touchControls.addEventListener("pointerdown", (event) => {
+  const button = event.target.closest("button[data-touch]");
+  if (!button) return;
+  event.preventDefault();
+  touchState[button.dataset.touch] = true;
+  button.setPointerCapture(event.pointerId);
+});
+
+touchControls.addEventListener("pointerup", (event) => {
+  const button = event.target.closest("button[data-touch]");
+  if (!button) return;
+  touchState[button.dataset.touch] = false;
+});
+
+touchControls.addEventListener("pointercancel", (event) => {
+  const button = event.target.closest("button[data-touch]");
+  if (!button) return;
+  touchState[button.dataset.touch] = false;
+});
+
 dialog.addEventListener("close", () => {
   if (onlineRole === "client") return;
   resetMatch();
@@ -1193,6 +1483,11 @@ window.addEventListener("mousemove", (event) => {
 });
 
 window.addEventListener("mousedown", (event) => {
+  if (joinInputMode) {
+    event.preventDefault();
+    claimNextPlayer("mouse");
+    return;
+  }
   if (document.pointerLockElement !== canvas) return;
   mouseButtons = event.buttons;
   event.preventDefault();

@@ -207,6 +207,15 @@ select {
   gap: 8px;
 }
 
+.tuning-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.tuning-panel label {
+  grid-template-columns: 72px 1fr 4ch;
+}
+
 .online-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) repeat(3, minmax(70px, 0.7fr));
@@ -317,6 +326,12 @@ select {
   white-space: nowrap;
 }
 
+.profile-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
 .bind-button,
 .secondary-button {
   min-width: 0;
@@ -352,6 +367,26 @@ select {
   color: var(--paper);
 }
 
+.touch-controls {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 56px;
+  display: none;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  pointer-events: none;
+}
+
+.touch-controls button {
+  height: 48px;
+  border: 1px solid var(--faint);
+  background: rgba(5, 5, 5, 0.72);
+  color: var(--ink);
+  pointer-events: auto;
+  touch-action: none;
+}
+
 @media (max-width: 620px) {
   .shell {
     padding: 0;
@@ -381,6 +416,10 @@ select {
     grid-template-columns: 1fr;
   }
 
+  .tuning-panel label {
+    grid-template-columns: 66px 1fr 4ch;
+  }
+
   .control-row {
     grid-template-columns: 28px repeat(2, minmax(0, 1fr));
   }
@@ -399,5 +438,13 @@ select {
 
   .mouse-editor {
     grid-template-columns: 1fr;
+  }
+
+  .profile-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .touch-controls {
+    display: grid;
   }
 }

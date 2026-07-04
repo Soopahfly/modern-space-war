@@ -57,6 +57,31 @@
               <label><input id="moonMode" type="checkbox"> Moons</label>
               <label><input id="cometMode" type="checkbox"> Comet</label>
               <label><input id="variantMode" type="checkbox"> Variants</label>
+              <label><input id="soundMode" type="checkbox"> Sound</label>
+              <label><input id="attractMode" type="checkbox"> Attract</label>
+            </div>
+            <div class="tuning-panel">
+              <div class="panel-title">Tuning</div>
+              <label>
+                <span>Turn</span>
+                <input id="turnTune" type="range" min="50" max="150" value="100">
+                <output id="turnTuneOut">100</output>
+              </label>
+              <label>
+                <span>Thrust</span>
+                <input id="thrustTune" type="range" min="50" max="150" value="100">
+                <output id="thrustTuneOut">100</output>
+              </label>
+              <label>
+                <span>Shot</span>
+                <input id="shotTune" type="range" min="50" max="150" value="100">
+                <output id="shotTuneOut">100</output>
+              </label>
+              <label>
+                <span>Bots</span>
+                <input id="botCount" type="range" min="0" max="5" value="0">
+                <output id="botCountOut">0</output>
+              </label>
             </div>
             <div class="online-panel">
               <div class="panel-title">Online</div>
@@ -75,11 +100,24 @@
               <div id="gamepadStatus" class="gamepad-status">No gamepads detected</div>
               <div id="mouseEditor" class="mouse-editor"></div>
               <div class="mouse-status">Mouse or spinner: move rotates, left thrusts, right fires</div>
+              <div class="profile-row">
+                <button id="saveProfile" class="secondary-button" type="button">SAVE PROFILE</button>
+                <button id="loadProfile" class="secondary-button" type="button">LOAD PROFILE</button>
+                <button id="joinByInput" class="secondary-button" type="button">JOIN INPUT</button>
+                <button id="connectHid" class="secondary-button" type="button">WEBHID</button>
+              </div>
+              <div id="inputStatus" class="mouse-status">Profiles, join-by-input, and WebHID ready</div>
               <button id="resetControls" class="secondary-button" type="button">RESET CONTROLS</button>
             </div>
             <button id="startButton" value="start" type="submit">START</button>
           </form>
         </dialog>
+        <div id="touchControls" class="touch-controls" aria-label="Touch controls">
+          <button data-touch="left" type="button">LEFT</button>
+          <button data-touch="right" type="button">RIGHT</button>
+          <button data-touch="thrust" type="button">THRUST</button>
+          <button data-touch="fire" type="button">FIRE</button>
+        </div>
       </section>
     </main>
     <script src="game.js"></script>
