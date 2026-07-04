@@ -4,6 +4,14 @@ A local browser version of the classic Spacewar idea: monochrome vector ships, a
 
 Open `index.html` in a modern browser. No build step is required.
 
+For online play, run the local server:
+
+```text
+npm start
+```
+
+Then open `http://localhost:8080`. One browser clicks `HOST` to create a room, starts the match, and other browsers join with the room code. The host browser owns the physics and connected players send their controls to it. For another computer on the same network, use the host computer's LAN address instead of `localhost`.
+
 Controls are shown on the start screen. Each player has rotate left, rotate right, thrust, and fire. To remap keys, click a control button, press the new key, or press `Esc` to cancel. `Space`, `Enter`, and `Tab` are reserved for global controls.
 
 Gamepads and joysticks are supported through the browser Gamepad API. Click a player's `PAD` button on the setup screen, then move a stick or press a button on the controller to assign it. Left stick or D-pad left/right rotates, A / left trigger / right trigger / D-pad up thrusts, and B / X / right bumper / D-pad down fires.

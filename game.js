@@ -18,6 +18,11 @@ const debrisMode = document.getElementById("debrisMode");
 const moonMode = document.getElementById("moonMode");
 const cometMode = document.getElementById("cometMode");
 const variantMode = document.getElementById("variantMode");
+const roomCode = document.getElementById("roomCode");
+const hostRoom = document.getElementById("hostRoom");
+const joinRoom = document.getElementById("joinRoom");
+const leaveRoom = document.getElementById("leaveRoom");
+const onlineStatus = document.getElementById("onlineStatus");
 const controlEditor = document.getElementById("controlEditor");
 const gamepadEditor = document.getElementById("gamepadEditor");
 const gamepadStatus = document.getElementById("gamepadStatus");
@@ -89,6 +94,16 @@ let playerPads = Array(6).fill(null);
 let mousePlayer = null;
 let mouseTurn = 0;
 let mouseButtons = 0;
+let onlineRole = "local";
+let onlineRoom = "";
+let onlinePlayer = 0;
+let socket = null;
+let remoteInputs = Array.from({ length: 6 }, () => blankInput());
+let lastSnapshotAt = 0;
+
+function blankInput() {
+  return { left: false, right: false, thrust: false, fire: false, mouseTurn: 0 };
+}
 
 function cloneControlSets(sets) {
   return sets.map((set) => ({ ...set }));
@@ -325,9 +340,14 @@ function readPadInput(player, action) {
   return false;
 }
 
-function actionActive(player, action) {
+function localActionActive(player, action) {
   const controls = controlSets[player];
   return keys.has(controls[action]) || readPadInput(player, action) || readMouseInput(player, action);
+}
+
+function actionActive(player, action) {
+  if (onlineRole === "host" && player !== 0) return Boolean(remoteInputs[player] && remoteInputs[player][action]);
+  return localActionActive(player, action);
 }
 
 function axis(pad, index) {
@@ -379,7 +399,143 @@ function readMouseInput(player, action) {
   return false;
 }
 
+function connectOnline(kind) {
+  leaveOnline(false);
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  socket = new WebSocket(`${protocol}//${location.host}`);
+  onlineStatus.textContent = "Connecting";
+  socket.addEventListener("open", () => {
+    const code = roomCode.value.trim().toUpperCase();
+    sendOnline(kind === "host" ? { type: "create" } : { type: "join", room: code });
+  });
+  socket.addEventListener("message", (event) => handleOnlineMessage(JSON.parse(event.data)));
+  socket.addEventListener("close", () => leaveOnline(false));
+  socket.addEventListener("error", () => {
+    onlineStatus.textContent = "Online server not reachable";
+  });
+}
+
+function handleOnlineMessage(message) {
+  if (message.type === "created" || message.type === "joined") {
+    onlineRole = message.host ? "host" : "client";
+    onlineRoom = message.room;
+    onlinePlayer = message.player;
+    roomCode.value = onlineRoom;
+    onlineStatus.textContent = `${onlineRole.toUpperCase()} ${onlineRoom} P${onlinePlayer + 1}`;
+    if (onlineRole === "client") {
+      started = false;
+      betweenRounds = true;
+    }
+    return;
+  }
+  if (message.type === "error") {
+    onlineStatus.textContent = message.message || "Online error";
+    leaveOnline(false);
+    return;
+  }
+  if (message.type === "peer" && onlineRole === "host") {
+    const count = clamp(message.count, 2, 6);
+    playerCount.value = String(Math.max(Number(playerCount.value), count));
+    playerCountOut.value = playerCount.value;
+    renderControlEditor();
+    renderGamepadEditor();
+    renderMouseEditor();
+    onlineStatus.textContent = `HOST ${onlineRoom} ${message.count} PLAYERS`;
+    return;
+  }
+  if (message.type === "input" && onlineRole === "host") {
+    remoteInputs[message.player] = message.input;
+    return;
+  }
+  if (message.type === "snapshot" && onlineRole === "client") {
+    applySnapshot(message.state);
+  }
+}
+
+function leaveOnline(updateStatus = true) {
+  if (socket) {
+    const closing = socket;
+    socket = null;
+    closing.close();
+  }
+  onlineRole = "local";
+  onlineRoom = "";
+  onlinePlayer = 0;
+  remoteInputs = Array.from({ length: 6 }, () => blankInput());
+  if (updateStatus) onlineStatus.textContent = "Offline";
+}
+
+function sendOnline(message) {
+  if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+}
+
+function publishOnline(dt) {
+  if (onlineRole === "client") {
+    sendOnline({ type: "input", input: localInputPacket(0) });
+    return;
+  }
+  if (onlineRole !== "host") return;
+  lastSnapshotAt += dt;
+  if (lastSnapshotAt >= 0.05) {
+    lastSnapshotAt = 0;
+    sendOnline({ type: "snapshot", state: snapshotState() });
+  }
+}
+
+function localInputPacket(player) {
+  return {
+    left: localActionActive(player, "left"),
+    right: localActionActive(player, "right"),
+    thrust: localActionActive(player, "thrust"),
+    fire: localActionActive(player, "fire"),
+    mouseTurn: mousePlayer === player && document.pointerLockElement === canvas ? mouseTurn : 0
+  };
+}
+
+function snapshotState() {
+  return {
+    players,
+    shots,
+    sparks,
+    debris,
+    moons,
+    comet,
+    started,
+    betweenRounds,
+    roundTimer,
+    targetScore,
+    options,
+    teamScores,
+    roundScored,
+    cometTimer,
+    starGravity: STAR.gravity,
+    stateText: stateNode.textContent
+  };
+}
+
+function applySnapshot(state) {
+  players = state.players || [];
+  shots = state.shots || [];
+  sparks = state.sparks || [];
+  debris = state.debris || [];
+  moons = state.moons || [];
+  comet = state.comet;
+  started = state.started;
+  betweenRounds = state.betweenRounds;
+  roundTimer = state.roundTimer;
+  targetScore = state.targetScore;
+  options = state.options || {};
+  teamScores = state.teamScores || [0, 0];
+  roundScored = state.roundScored;
+  cometTimer = state.cometTimer;
+  STAR.gravity = state.starGravity || STAR.gravity;
+  stateNode.textContent = state.stateText || "ONLINE";
+  renderScores();
+}
+
 function update(dt) {
+  publishOnline(dt);
+  if (onlineRole === "client") return;
   if (!started) {
     stateNode.textContent = "READY";
     return;
@@ -419,6 +575,10 @@ function updatePlayer(p, dt) {
   if (!p.alive) return;
   if (mousePlayer === p.id && document.pointerLockElement === canvas) {
     p.angle += mouseTurn * 0.014 * p.trait.turn;
+  }
+  if (onlineRole === "host" && p.id !== 0 && remoteInputs[p.id]) {
+    p.angle += remoteInputs[p.id].mouseTurn * 0.014 * p.trait.turn;
+    remoteInputs[p.id].mouseTurn = 0;
   }
   if (actionActive(p.id, "left")) p.angle -= 4.25 * p.trait.turn * dt;
   if (actionActive(p.id, "right")) p.angle += 4.25 * p.trait.turn * dt;
@@ -920,7 +1080,7 @@ window.addEventListener("keydown", (event) => {
   }
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(event.code)) event.preventDefault();
   keys.add(event.code);
-  if (event.code === "Enter" && betweenRounds && roundTimer > 900000) resetMatch();
+  if (event.code === "Enter" && betweenRounds && roundTimer > 900000 && onlineRole !== "client") resetMatch();
   if (event.code === "Escape" && !dialog.open) {
     keys.clear();
     dialog.showModal();
@@ -962,6 +1122,18 @@ mouseEditor.addEventListener("click", (event) => {
   renderMouseEditor();
 });
 
+hostRoom.addEventListener("click", () => {
+  connectOnline("host");
+});
+
+joinRoom.addEventListener("click", () => {
+  connectOnline("join");
+});
+
+leaveRoom.addEventListener("click", () => {
+  leaveOnline();
+});
+
 resetControls.addEventListener("click", () => {
   controlSets = cloneControlSets(defaultControlSets);
   pendingBind = null;
@@ -996,6 +1168,7 @@ gravity.addEventListener("input", () => {
 });
 
 dialog.addEventListener("close", () => {
+  if (onlineRole === "client") return;
   resetMatch();
 });
 

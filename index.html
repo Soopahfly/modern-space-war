@@ -58,6 +58,16 @@
               <label><input id="cometMode" type="checkbox"> Comet</label>
               <label><input id="variantMode" type="checkbox"> Variants</label>
             </div>
+            <div class="online-panel">
+              <div class="panel-title">Online</div>
+              <div class="online-row">
+                <input id="roomCode" type="text" maxlength="6" placeholder="ROOM">
+                <button id="hostRoom" class="secondary-button" type="button">HOST</button>
+                <button id="joinRoom" class="secondary-button" type="button">JOIN</button>
+                <button id="leaveRoom" class="secondary-button" type="button">OFFLINE</button>
+              </div>
+              <div id="onlineStatus" class="online-status">Offline</div>
+            </div>
             <div class="controls-panel">
               <div class="panel-title">Controls</div>
               <div id="controlEditor" class="control-editor"></div>
