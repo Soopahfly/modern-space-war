@@ -19,6 +19,8 @@ const moonMode = document.getElementById("moonMode");
 const cometMode = document.getElementById("cometMode");
 const variantMode = document.getElementById("variantMode");
 const controlEditor = document.getElementById("controlEditor");
+const gamepadEditor = document.getElementById("gamepadEditor");
+const gamepadStatus = document.getElementById("gamepadStatus");
 const resetControls = document.getElementById("resetControls");
 
 const TAU = Math.PI * 2;
@@ -81,6 +83,8 @@ let teamScores = [0, 0];
 let roundScored = false;
 let cometTimer = 6;
 let pendingBind = null;
+let pendingPadBind = null;
+let playerPads = Array(6).fill(null);
 
 function cloneControlSets(sets) {
   return sets.map((set) => ({ ...set }));
@@ -267,6 +271,89 @@ function setControlBinding(player, action, code) {
   renderControlEditor();
 }
 
+function renderGamepadEditor() {
+  const count = Number(playerCount.value);
+  gamepadEditor.innerHTML = "";
+  for (let player = 0; player < count; player++) {
+    const button = document.createElement("button");
+    button.className = "pad-button";
+    button.type = "button";
+    button.dataset.player = String(player);
+    const assigned = playerPads[player];
+    button.textContent = pendingPadBind === player
+      ? `P${player + 1} PRESS PAD`
+      : `P${player + 1} PAD ${assigned === null ? "---" : assigned + 1}`;
+    if (pendingPadBind === player) button.classList.add("waiting");
+    gamepadEditor.append(button);
+  }
+  renderGamepadStatus();
+}
+
+function renderGamepadStatus() {
+  const pads = connectedGamepads();
+  if (!pads.length) {
+    gamepadStatus.textContent = "No gamepads detected";
+    return;
+  }
+  gamepadStatus.textContent = pads.map((pad) => `PAD ${pad.index + 1}: ${cleanPadName(pad.id)}`).join(" / ");
+}
+
+function cleanPadName(id) {
+  return id.replace(/\s*\(.*?\)\s*/g, " ").replace(/\s+/g, " ").trim().slice(0, 32);
+}
+
+function connectedGamepads() {
+  if (!navigator.getGamepads) return [];
+  return Array.from(navigator.getGamepads()).filter(Boolean);
+}
+
+function readPadInput(player, action) {
+  const index = playerPads[player];
+  if (index === null || !navigator.getGamepads) return false;
+  const pad = navigator.getGamepads()[index];
+  if (!pad) return false;
+  const x = axis(pad, 0);
+  if (action === "left") return x < -0.35 || button(pad, 14);
+  if (action === "right") return x > 0.35 || button(pad, 15);
+  if (action === "thrust") return button(pad, 0) || button(pad, 6) || button(pad, 7) || axis(pad, 1) < -0.65 || button(pad, 12);
+  if (action === "fire") return button(pad, 1) || button(pad, 2) || button(pad, 5) || button(pad, 13);
+  return false;
+}
+
+function actionActive(player, action) {
+  const controls = controlSets[player];
+  return keys.has(controls[action]) || readPadInput(player, action);
+}
+
+function axis(pad, index) {
+  const value = pad.axes[index] || 0;
+  return Math.abs(value) < 0.18 ? 0 : value;
+}
+
+function button(pad, index) {
+  const control = pad.buttons[index];
+  return Boolean(control && control.pressed);
+}
+
+function findActiveGamepad() {
+  for (const pad of connectedGamepads()) {
+    const moved = pad.axes.some((value) => Math.abs(value) > 0.65);
+    const pressed = pad.buttons.some((item) => item.pressed);
+    if (moved || pressed) return pad.index;
+  }
+  return null;
+}
+
+function processGamepadAssignment() {
+  if (pendingPadBind === null) return;
+  const index = findActiveGamepad();
+  if (index === null) return;
+  playerPads = playerPads.map((value) => value === index ? null : value);
+  playerPads[pendingPadBind] = index;
+  pendingPadBind = null;
+  renderGamepadEditor();
+}
+
 function update(dt) {
   if (!started) {
     stateNode.textContent = "READY";
@@ -304,16 +391,15 @@ function modeLabel() {
 
 function updatePlayer(p, dt) {
   if (!p.alive) return;
-  const controls = controlSets[p.id];
-  if (keys.has(controls.left)) p.angle -= 4.25 * p.trait.turn * dt;
-  if (keys.has(controls.right)) p.angle += 4.25 * p.trait.turn * dt;
-  if (keys.has(controls.thrust) && (!options.fuel || p.fuel > 0)) {
+  if (actionActive(p.id, "left")) p.angle -= 4.25 * p.trait.turn * dt;
+  if (actionActive(p.id, "right")) p.angle += 4.25 * p.trait.turn * dt;
+  if (actionActive(p.id, "thrust") && (!options.fuel || p.fuel > 0)) {
     p.vx += Math.cos(p.angle) * 235 * p.trait.thrust * dt;
     p.vy += Math.sin(p.angle) * 235 * p.trait.thrust * dt;
     p.fuel = Math.max(0, p.fuel - 18 * dt);
     makeThrust(p);
   }
-  if (keys.has(controls.fire) && p.cool <= 0) fire(p);
+  if (actionActive(p.id, "fire") && p.cool <= 0) fire(p);
   p.cool = Math.max(0, p.cool - dt);
   p.invulnerable = Math.max(0, p.invulnerable - dt);
   applyGravityBodies(p, dt);
@@ -771,6 +857,7 @@ function clamp(value, min, max) {
 function frame(now) {
   const dt = Math.min(0.033, (now - lastTime) / 1000);
   lastTime = now;
+  processGamepadAssignment();
   update(dt);
   draw();
   requestAnimationFrame(frame);
@@ -784,6 +871,12 @@ function resizeCanvas() {
 }
 
 window.addEventListener("keydown", (event) => {
+  if (pendingPadBind !== null && event.code === "Escape") {
+    event.preventDefault();
+    pendingPadBind = null;
+    renderGamepadEditor();
+    return;
+  }
   if (pendingBind) {
     event.preventDefault();
     if (event.code === "Escape") {
@@ -823,11 +916,21 @@ controlEditor.addEventListener("click", (event) => {
   renderControlEditor();
 });
 
+gamepadEditor.addEventListener("click", (event) => {
+  const button = event.target.closest(".pad-button");
+  if (!button) return;
+  pendingPadBind = Number(button.dataset.player);
+  renderGamepadEditor();
+});
+
 resetControls.addEventListener("click", () => {
   controlSets = cloneControlSets(defaultControlSets);
   pendingBind = null;
+  pendingPadBind = null;
+  playerPads = Array(6).fill(null);
   keys.clear();
   renderControlEditor();
+  renderGamepadEditor();
 });
 
 pauseButton.addEventListener("click", () => {
@@ -838,7 +941,9 @@ pauseButton.addEventListener("click", () => {
 playerCount.addEventListener("input", () => {
   playerCountOut.value = playerCount.value;
   pendingBind = null;
+  pendingPadBind = null;
   renderControlEditor();
+  renderGamepadEditor();
 });
 
 gravity.addEventListener("input", () => {
@@ -855,11 +960,22 @@ dialog.addEventListener("cancel", (event) => {
 
 window.addEventListener("resize", resizeCanvas);
 
+window.addEventListener("gamepadconnected", () => {
+  renderGamepadEditor();
+});
+
+window.addEventListener("gamepaddisconnected", (event) => {
+  playerPads = playerPads.map((value) => value === event.gamepad.index ? null : value);
+  pendingPadBind = null;
+  renderGamepadEditor();
+});
+
 seededStars();
 resizeCanvas();
 options = readOptions();
 renderScores();
 renderControlEditor();
+renderGamepadEditor();
 if (typeof dialog.showModal === "function") {
   dialog.showModal();
 } else {
