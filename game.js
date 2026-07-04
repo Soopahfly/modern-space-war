@@ -93,10 +93,11 @@ const variantTraits = [
 ];
 
 const botDifficulties = {
-  rookie: { label: "Rookie", reaction: 0.34, aimError: 0.34, lead: 0.22, fireAngle: 0.11, fireRange: 400, fireDiscipline: 0.45, thrust: 0.82, danger: 190, jitter: 0.2 },
-  standard: { label: "Standard", reaction: 0.2, aimError: 0.2, lead: 0.45, fireAngle: 0.16, fireRange: 520, fireDiscipline: 0.68, thrust: 0.96, danger: 155, jitter: 0.12 },
-  veteran: { label: "Veteran", reaction: 0.12, aimError: 0.11, lead: 0.72, fireAngle: 0.21, fireRange: 650, fireDiscipline: 0.84, thrust: 1.08, danger: 130, jitter: 0.07 },
-  ace: { label: "Ace", reaction: 0.07, aimError: 0.055, lead: 0.94, fireAngle: 0.27, fireRange: 760, fireDiscipline: 0.96, thrust: 1.16, danger: 112, jitter: 0.035 }
+  rookie: { label: "Rookie", reaction: 0.34, aimError: 0.34, lead: 0.22, fireAngle: 0.11, fireRange: 400, fireDiscipline: 0.45, thrust: 0.82, danger: 190, jitter: 0.2, trick: 0, vindictive: false },
+  standard: { label: "Standard", reaction: 0.2, aimError: 0.2, lead: 0.45, fireAngle: 0.16, fireRange: 520, fireDiscipline: 0.68, thrust: 0.96, danger: 155, jitter: 0.12, trick: 0.15, vindictive: false },
+  veteran: { label: "Veteran", reaction: 0.12, aimError: 0.11, lead: 0.72, fireAngle: 0.21, fireRange: 650, fireDiscipline: 0.84, thrust: 1.08, danger: 130, jitter: 0.07, trick: 0.34, vindictive: false },
+  ace: { label: "Ace", reaction: 0.07, aimError: 0.055, lead: 0.94, fireAngle: 0.27, fireRange: 760, fireDiscipline: 0.96, thrust: 1.16, danger: 112, jitter: 0.035, trick: 0.55, vindictive: false },
+  bastard: { label: "Bastard", reaction: 0.045, aimError: 0.025, lead: 1.08, fireAngle: 0.32, fireRange: 920, fireDiscipline: 1, thrust: 1.22, danger: 96, jitter: 0.018, trick: 1, vindictive: true }
 };
 
 let players = [];
@@ -540,28 +541,50 @@ function updateBots(dt) {
       continue;
     }
     state.targetId = target.id;
-    const delta = toroidalDelta(bot, target);
-    const d = Math.sqrt(delta.dx * delta.dx + delta.dy * delta.dy);
-    const leadTime = clamp(d / (430 * bot.trait.shot * options.shotTune), 0, 1.15) * skill.lead;
-    const desired = Math.atan2(
-      delta.dy + (target.vy - bot.vy) * leadTime,
-      delta.dx + (target.vx - bot.vx) * leadTime
-    ) + state.wobble;
-    const turn = normalizeAngle(desired - bot.angle);
+    const aim = chooseBotAim(bot, target, skill, state);
+    const turn = normalizeAngle(aim.angle - bot.angle);
     const starD = distance(bot, STAR);
     const starDelta = toroidalDelta(bot, STAR);
     const starTurn = normalizeAngle(Math.atan2(-starDelta.dy, -starDelta.dx) - bot.angle);
     const danger = starD < skill.danger || closingOnStar(bot, starDelta, starD);
-    const canFire = state.fireHold <= 0 && Math.abs(turn) < skill.fireAngle && d < skill.fireRange && !shotWouldHitStar(bot, desired);
+    const fireAngle = aim.trick ? skill.fireAngle * 0.82 : skill.fireAngle;
+    const canFire = state.fireHold <= 0 && Math.abs(turn) < fireAngle && aim.distance < skill.fireRange && !shotWouldHitStar(bot, aim.angle, skill);
     if (canFire) state.fireHold = 0.08 + Math.random() * Math.max(0.08, 0.24 - skill.reaction * 0.35);
     botInputs[id] = {
       left: danger ? starTurn < -0.08 : turn < -0.08,
       right: danger ? starTurn > 0.08 : turn > 0.08,
-      thrust: danger || (Math.abs(turn) < 0.85 + skill.jitter && d > 130 && Math.random() < skill.thrust),
+      thrust: danger || (Math.abs(turn) < 0.85 + skill.jitter && aim.distance > 130 && Math.random() < skill.thrust),
       fire: canFire && Math.random() < skill.fireDiscipline,
       mouseTurn: 0
     };
   }
+}
+
+function chooseBotAim(bot, target, skill, state) {
+  const shotSpeed = 430 * bot.trait.shot * options.shotTune;
+  let best = null;
+  for (let ox = -1; ox <= 1; ox++) {
+    for (let oy = -1; oy <= 1; oy++) {
+      const dx = target.x + ox * WORLD.w - bot.x;
+      const dy = target.y + oy * WORLD.h - bot.y;
+      const distanceToTarget = Math.sqrt(dx * dx + dy * dy);
+      const leadTime = clamp(distanceToTarget / shotSpeed, 0, 1.25) * skill.lead;
+      const leadDx = dx + (target.vx - bot.vx) * leadTime;
+      const leadDy = dy + (target.vy - bot.vy) * leadTime;
+      const distance = Math.sqrt(leadDx * leadDx + leadDy * leadDy);
+      const angle = Math.atan2(leadDy, leadDx) + state.wobble;
+      const starClearance = shotStarClearance(bot, angle);
+      const wrapLane = ox !== 0 || oy !== 0;
+      const skim = starClearance > STAR.radius + 10 && starClearance < STAR.radius + 95;
+      let score = -distance;
+      score += wrapLane ? 180 * skill.trick : 0;
+      score += skim ? 140 * skill.trick : 0;
+      score -= shotWouldHitStar(bot, angle, skill) ? 10000 : 0;
+      score += Math.random() * skill.jitter * 100;
+      if (!best || score > best.score) best = { angle, distance, trick: wrapLane || skim, score };
+    }
+  }
+  return best || { angle: bot.angle, distance: Infinity, trick: false };
 }
 
 function chooseBotTarget(bot, skill, humansPresent) {
@@ -577,8 +600,8 @@ function chooseBotTarget(bot, skill, humansPresent) {
       const ringD = Math.abs(distance(candidate, STAR) - (KING_RING.inner + KING_RING.outer) / 2);
       score += clamp(1.2 - ringD / 140, 0, 1.2);
     }
-    if (options.botRevenge && humansPresent && !botPlayers.has(candidate.id) && state.revengeTarget === candidate.id) {
-      score += 3.5 * clamp(state.revengeHeat, 0, 1);
+    if ((options.botRevenge || skill.vindictive) && humansPresent && !botPlayers.has(candidate.id) && state.revengeTarget === candidate.id) {
+      score += (skill.vindictive ? 5.5 : 3.5) * clamp(state.revengeHeat, 0, 1);
     }
     score += Math.random() * skill.jitter;
     if (score > bestScore) {
@@ -595,12 +618,17 @@ function closingOnStar(bot, starDelta, starD) {
   return inwardSpeed > 80 && starD < 175;
 }
 
-function shotWouldHitStar(bot, angle) {
+function shotStarClearance(bot, angle) {
   const delta = toroidalDelta(bot, STAR);
   const along = delta.dx * Math.cos(angle) + delta.dy * Math.sin(angle);
-  if (along <= 0 || along > 520) return false;
-  const cross = Math.abs(delta.dx * Math.sin(angle) - delta.dy * Math.cos(angle));
-  return cross < STAR.radius + 6;
+  if (along <= 0 || along > 560) return Infinity;
+  return Math.abs(delta.dx * Math.sin(angle) - delta.dy * Math.cos(angle));
+}
+
+function shotWouldHitStar(bot, angle, skill) {
+  const clearance = shotStarClearance(bot, angle);
+  const margin = skill && skill.trick > 0.8 ? 2 : 6;
+  return clearance < STAR.radius + margin;
 }
 
 function updateAttract(dt) {
@@ -1105,7 +1133,8 @@ function destroyShip(p, scorerId = null) {
   burst(p.x, p.y, 24);
   playTone(80, 0.16, 0.055);
   if (options.debris) makeDebris(p);
-  if (options.botRevenge && botPlayers.has(p.id) && scorerId !== null && !botPlayers.has(scorerId)) {
+  const skill = botDifficulties[options.botDifficulty] || botDifficulties.standard;
+  if ((options.botRevenge || skill.vindictive) && botPlayers.has(p.id) && scorerId !== null && !botPlayers.has(scorerId)) {
     const state = botStates[p.id] || makeBotState();
     state.revengeTarget = scorerId;
     state.revengeHeat = 1;
