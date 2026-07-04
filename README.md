@@ -41,7 +41,7 @@ Touch controls appear on small screens. They drive P1 with rotate left, rotate r
 
 Control profiles can be saved to browser `localStorage`. `JOIN INPUT` lets the next key, gamepad, or mouse claim the next player slot. `WEBHID` opens a guarded raw-HID connection for unusual controllers; generic reports use byte 0 as signed rotation and byte 1 as thrust/fire bits.
 
-Sound, bot count, attract mode, and tuning sliders are available on the setup screen. Bots fill the highest-numbered player slots, attract mode starts a bot demo while idle, and tuning adjusts turn rate, thrust, and shot speed.
+Sound, bot count, bot difficulty, attract mode, and tuning sliders are available on the setup screen. Bots fill the highest-numbered player slots, attract mode starts a bot demo while idle, and tuning adjusts turn rate, thrust, and shot speed. Bot difficulty changes reaction time, aim error, leading, fire discipline, and gravity avoidance. Revenge mode makes bots prefer the human player who last killed them.
 
 Modes:
 

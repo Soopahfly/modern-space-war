@@ -28,6 +28,8 @@ const shotTune = document.getElementById("shotTune");
 const shotTuneOut = document.getElementById("shotTuneOut");
 const botCount = document.getElementById("botCount");
 const botCountOut = document.getElementById("botCountOut");
+const botDifficulty = document.getElementById("botDifficulty");
+const botRevenge = document.getElementById("botRevenge");
 const roomCode = document.getElementById("roomCode");
 const hostRoom = document.getElementById("hostRoom");
 const joinRoom = document.getElementById("joinRoom");
@@ -90,6 +92,13 @@ const variantTraits = [
   { label: "LONG", turn: 0.9, thrust: 1, shot: 1.28, cool: 1.2, fuel: 1.05 }
 ];
 
+const botDifficulties = {
+  rookie: { label: "Rookie", reaction: 0.34, aimError: 0.34, lead: 0.22, fireAngle: 0.11, fireRange: 400, fireDiscipline: 0.45, thrust: 0.82, danger: 190, jitter: 0.2 },
+  standard: { label: "Standard", reaction: 0.2, aimError: 0.2, lead: 0.45, fireAngle: 0.16, fireRange: 520, fireDiscipline: 0.68, thrust: 0.96, danger: 155, jitter: 0.12 },
+  veteran: { label: "Veteran", reaction: 0.12, aimError: 0.11, lead: 0.72, fireAngle: 0.21, fireRange: 650, fireDiscipline: 0.84, thrust: 1.08, danger: 130, jitter: 0.07 },
+  ace: { label: "Ace", reaction: 0.07, aimError: 0.055, lead: 0.94, fireAngle: 0.27, fireRange: 760, fireDiscipline: 0.96, thrust: 1.16, danger: 112, jitter: 0.035 }
+};
+
 let players = [];
 let shots = [];
 let sparks = [];
@@ -123,6 +132,7 @@ let joinInputMode = false;
 let touchState = blankInput();
 let botPlayers = new Set();
 let botInputs = Array.from({ length: 6 }, () => blankInput());
+let botStates = Array.from({ length: 6 }, () => makeBotState());
 let hidDevice = null;
 let hidPlayer = 0;
 let hidTurn = 0;
@@ -133,6 +143,17 @@ let thrustSoundTimer = 0;
 
 function blankInput() {
   return { left: false, right: false, thrust: false, fire: false, mouseTurn: 0 };
+}
+
+function makeBotState() {
+  return {
+    targetId: null,
+    reaction: 0,
+    wobble: 0,
+    fireHold: 0,
+    revengeTarget: null,
+    revengeHeat: 0
+  };
 }
 
 function cloneControlSets(sets) {
@@ -167,7 +188,9 @@ function readOptions() {
     turnTune: Number(turnTune.value) / 100,
     thrustTune: Number(thrustTune.value) / 100,
     shotTune: Number(shotTune.value) / 100,
-    bots: Number(botCount.value)
+    bots: Number(botCount.value),
+    botDifficulty: botDifficulty.value,
+    botRevenge: botRevenge.checked
   };
 }
 
@@ -201,6 +224,7 @@ function configureBots(count) {
   const bots = clamp(options.bots || 0, 0, Math.max(0, count - 1));
   for (let i = count - bots; i < count; i++) botPlayers.add(i);
   botInputs = Array.from({ length: 6 }, () => blankInput());
+  botStates = Array.from({ length: 6 }, () => makeBotState());
 }
 
 function makePlayer(index, count) {
@@ -277,7 +301,8 @@ function renderScores() {
     const fuel = options.fuel ? ` ${Math.ceil(p.fuel)}` : "";
     const team = options.mode === "teams" ? ` T${p.team + 1}` : "";
     const trait = options.variants ? ` ${p.trait.label}` : "";
-    return `<div class="score"><span>${p.name}${team}${tag}${trait}</span><strong>${p.score}${fuel}</strong></div>`;
+    const bot = botPlayers.has(p.id) ? " CPU" : "";
+    return `<div class="score"><span>${p.name}${team}${tag}${trait}${bot}</span><strong>${p.score}${fuel}</strong></div>`;
   }).join("");
 }
 
@@ -486,33 +511,96 @@ function readHidInput(player, action) {
   return false;
 }
 
-function updateBots() {
+function updateBots(dt) {
   if (!botPlayers.size) return;
+  const skill = botDifficulties[options.botDifficulty] || botDifficulties.standard;
+  const humansPresent = players.some((p) => p.alive && !botPlayers.has(p.id));
   for (const id of botPlayers) {
     const bot = players[id];
+    const state = botStates[id] || makeBotState();
+    botStates[id] = state;
+    state.fireHold = Math.max(0, state.fireHold - dt);
+    state.revengeHeat = Math.max(0, state.revengeHeat - dt * 0.08);
     if (!bot || !bot.alive) {
       botInputs[id] = blankInput();
       continue;
     }
-    const target = nearestEnemy(bot);
+    state.reaction -= dt;
+    if (state.reaction <= 0) {
+      state.reaction = skill.reaction * (0.65 + Math.random() * 0.7);
+      state.wobble = (Math.random() - 0.5) * skill.aimError;
+      const nextTarget = chooseBotTarget(bot, skill, humansPresent);
+      state.targetId = nextTarget ? nextTarget.id : null;
+    }
+    const target = players[state.targetId] && players[state.targetId].alive
+      ? players[state.targetId]
+      : chooseBotTarget(bot, skill, humansPresent);
     if (!target) {
       botInputs[id] = blankInput();
       continue;
     }
-    const dx = shortestDelta(target.x - bot.x, WORLD.w);
-    const dy = shortestDelta(target.y - bot.y, WORLD.h);
-    const desired = Math.atan2(dy, dx);
+    state.targetId = target.id;
+    const delta = toroidalDelta(bot, target);
+    const d = Math.sqrt(delta.dx * delta.dx + delta.dy * delta.dy);
+    const leadTime = clamp(d / (430 * bot.trait.shot * options.shotTune), 0, 1.15) * skill.lead;
+    const desired = Math.atan2(
+      delta.dy + (target.vy - bot.vy) * leadTime,
+      delta.dx + (target.vx - bot.vx) * leadTime
+    ) + state.wobble;
     const turn = normalizeAngle(desired - bot.angle);
-    const d = Math.sqrt(dx * dx + dy * dy);
     const starD = distance(bot, STAR);
+    const starDelta = toroidalDelta(bot, STAR);
+    const starTurn = normalizeAngle(Math.atan2(-starDelta.dy, -starDelta.dx) - bot.angle);
+    const danger = starD < skill.danger || closingOnStar(bot, starDelta, starD);
+    const canFire = state.fireHold <= 0 && Math.abs(turn) < skill.fireAngle && d < skill.fireRange && !shotWouldHitStar(bot, desired);
+    if (canFire) state.fireHold = 0.08 + Math.random() * Math.max(0.08, 0.24 - skill.reaction * 0.35);
     botInputs[id] = {
-      left: turn < -0.12,
-      right: turn > 0.12,
-      thrust: Math.abs(turn) < 0.9 && (d > 170 || starD < 130),
-      fire: Math.abs(turn) < 0.18 && d < 520,
+      left: danger ? starTurn < -0.08 : turn < -0.08,
+      right: danger ? starTurn > 0.08 : turn > 0.08,
+      thrust: danger || (Math.abs(turn) < 0.85 + skill.jitter && d > 130 && Math.random() < skill.thrust),
+      fire: canFire && Math.random() < skill.fireDiscipline,
       mouseTurn: 0
     };
   }
+}
+
+function chooseBotTarget(bot, skill, humansPresent) {
+  let best = null;
+  let bestScore = -Infinity;
+  const state = botStates[bot.id] || makeBotState();
+  for (const candidate of players) {
+    if (!candidate.alive || candidate.id === bot.id || sameTeam(candidate.id, bot.id)) continue;
+    const d = Math.max(1, distance(bot, candidate));
+    let score = 900 / d;
+    if (options.mode === "bounty" && bountyTarget() === candidate) score += 2.2;
+    if (options.mode === "king") {
+      const ringD = Math.abs(distance(candidate, STAR) - (KING_RING.inner + KING_RING.outer) / 2);
+      score += clamp(1.2 - ringD / 140, 0, 1.2);
+    }
+    if (options.botRevenge && humansPresent && !botPlayers.has(candidate.id) && state.revengeTarget === candidate.id) {
+      score += 3.5 * clamp(state.revengeHeat, 0, 1);
+    }
+    score += Math.random() * skill.jitter;
+    if (score > bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+function closingOnStar(bot, starDelta, starD) {
+  if (starD > 220) return false;
+  const inwardSpeed = (bot.vx * starDelta.dx + bot.vy * starDelta.dy) / Math.max(1, starD);
+  return inwardSpeed > 80 && starD < 175;
+}
+
+function shotWouldHitStar(bot, angle) {
+  const delta = toroidalDelta(bot, STAR);
+  const along = delta.dx * Math.cos(angle) + delta.dy * Math.sin(angle);
+  if (along <= 0 || along > 520) return false;
+  const cross = Math.abs(delta.dx * Math.sin(angle) - delta.dy * Math.cos(angle));
+  return cross < STAR.radius + 6;
 }
 
 function updateAttract(dt) {
@@ -541,24 +629,17 @@ function updateAttract(dt) {
   stateNode.textContent = "DEMO";
 }
 
-function nearestEnemy(player) {
-  let best = null;
-  let bestD = Infinity;
-  for (const candidate of players) {
-    if (!candidate.alive || candidate.id === player.id || sameTeam(candidate.id, player.id)) continue;
-    const d = distance(player, candidate);
-    if (d < bestD) {
-      best = candidate;
-      bestD = d;
-    }
-  }
-  return best;
-}
-
 function shortestDelta(value, size) {
   if (value > size / 2) return value - size;
   if (value < -size / 2) return value + size;
   return value;
+}
+
+function toroidalDelta(from, to) {
+  return {
+    dx: shortestDelta(to.x - from.x, WORLD.w),
+    dy: shortestDelta(to.y - from.y, WORLD.h)
+  };
 }
 
 function normalizeAngle(value) {
@@ -590,7 +671,9 @@ function saveControlProfile() {
     turnTune: turnTune.value,
     thrustTune: thrustTune.value,
     shotTune: shotTune.value,
-    botCount: botCount.value
+    botCount: botCount.value,
+    botDifficulty: botDifficulty.value,
+    botRevenge: botRevenge.checked
   };
   localStorage.setItem("modernSpaceWar.profile", JSON.stringify(profile));
   inputStatus.textContent = "Profile saved";
@@ -610,6 +693,8 @@ function loadControlProfile() {
   thrustTune.value = profile.thrustTune || "100";
   shotTune.value = profile.shotTune || "100";
   botCount.value = profile.botCount || "0";
+  botDifficulty.value = profile.botDifficulty || "standard";
+  botRevenge.checked = Boolean(profile.botRevenge);
   updateTuneOutputs();
   renderControlEditor();
   renderGamepadEditor();
@@ -795,7 +880,7 @@ function update(dt) {
   }
 
   stateNode.textContent = modeLabel();
-  updateBots();
+  updateBots(dt);
   updateMoons(dt);
   updateComet(dt);
   for (const p of players) updatePlayer(p, dt);
@@ -1020,6 +1105,12 @@ function destroyShip(p, scorerId = null) {
   burst(p.x, p.y, 24);
   playTone(80, 0.16, 0.055);
   if (options.debris) makeDebris(p);
+  if (options.botRevenge && botPlayers.has(p.id) && scorerId !== null && !botPlayers.has(scorerId)) {
+    const state = botStates[p.id] || makeBotState();
+    state.revengeTarget = scorerId;
+    state.revengeHeat = 1;
+    botStates[p.id] = state;
+  }
   if (scorerId !== null && players[scorerId]) {
     let points = 1;
     if (options.mode === "bounty" && bountyTarget() === p) points = 2;

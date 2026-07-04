@@ -216,6 +216,11 @@ select {
   grid-template-columns: 72px 1fr 4ch;
 }
 
+.tuning-panel .wide-toggle input {
+  justify-self: start;
+  accent-color: var(--ink);
+}
+
 .online-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) repeat(3, minmax(70px, 0.7fr));
