@@ -974,13 +974,17 @@ function updatePlayer(p, dt) {
   if (actionActive(p.id, "fire") && p.cool <= 0) fire(p);
   p.cool = Math.max(0, p.cool - dt);
   p.invulnerable = Math.max(0, p.invulnerable - dt);
+  const previous = { x: p.x, y: p.y };
   applyGravityBodies(p, dt);
   p.x += p.vx * dt;
   p.y += p.vy * dt;
   p.vx *= 0.999;
   p.vy *= 0.999;
   wrap(p);
-  if (distance(p, STAR) < STAR.radius + 8 && p.invulnerable <= 0) destroyShip(p);
+  if (crossedStar(previous, p, STAR.radius + 8)) {
+    destroyShip(p);
+    return;
+  }
   if (options.mode === "king") updateKingScore(p, dt);
   if (comet && distance(p, comet) < comet.radius + 8 && p.invulnerable <= 0) destroyShip(p);
 }
@@ -1429,6 +1433,20 @@ function distance(a, b) {
   dx = Math.min(dx, WORLD.w - dx);
   dy = Math.min(dy, WORLD.h - dy);
   return Math.sqrt(dx * dx + dy * dy);
+}
+
+function crossedStar(from, to, radius) {
+  if (distance(to, STAR) < radius || distance(from, STAR) < radius) return true;
+  const dx = shortestDelta(to.x - from.x, WORLD.w);
+  const dy = shortestDelta(to.y - from.y, WORLD.h);
+  const sx = shortestDelta(STAR.x - from.x, WORLD.w);
+  const sy = shortestDelta(STAR.y - from.y, WORLD.h);
+  const span = dx * dx + dy * dy;
+  if (span <= 0.0001) return false;
+  const t = clamp((sx * dx + sy * dy) / span, 0, 1);
+  const cx = from.x + dx * t;
+  const cy = from.y + dy * t;
+  return distance({ x: cx, y: cy }, STAR) < radius;
 }
 
 function wrap(body) {
