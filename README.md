@@ -4,7 +4,7 @@ A local browser version of the classic Spacewar idea: monochrome vector ships, a
 
 Open `index.html` in a modern browser. No build step is required.
 
-Controls are shown on the start screen. Each player has rotate left, rotate right, thrust, and fire.
+Controls are shown on the start screen. Each player has rotate left, rotate right, thrust, and fire. To remap keys, click a control button, press the new key, or press `Esc` to cancel. `Space`, `Enter`, and `Tab` are reserved for global controls.
 
 Modes:
 

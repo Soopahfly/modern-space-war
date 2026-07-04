@@ -202,19 +202,60 @@ select {
   accent-color: var(--ink);
 }
 
-.control-grid {
+.controls-panel {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px 14px;
+  gap: 10px;
+}
+
+.panel-title {
   color: var(--dim);
   font-size: 12px;
 }
 
-.control-grid div {
+.control-editor {
+  display: grid;
+  gap: 8px;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.control-row {
+  display: grid;
+  grid-template-columns: 34px repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  align-items: center;
+}
+
+.control-row span {
+  color: var(--ink);
+}
+
+.bind-button,
+.secondary-button {
+  min-width: 0;
+  border: 1px solid var(--faint);
+  background: #050505;
+  color: var(--ink);
+}
+
+.bind-button {
+  height: 30px;
+  padding: 0 6px;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.bind-button.waiting {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.secondary-button {
+  height: 32px;
+  color: var(--dim);
 }
 
 #startButton {
@@ -249,7 +290,15 @@ select {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .control-grid {
-    grid-template-columns: 1fr;
+  .control-row {
+    grid-template-columns: 28px repeat(2, minmax(0, 1fr));
+  }
+
+  .control-row .bind-button:nth-of-type(3) {
+    grid-column: 2;
+  }
+
+  .control-row .bind-button:nth-of-type(4) {
+    grid-column: 3;
   }
 }

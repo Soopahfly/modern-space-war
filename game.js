@@ -18,6 +18,8 @@ const debrisMode = document.getElementById("debrisMode");
 const moonMode = document.getElementById("moonMode");
 const cometMode = document.getElementById("cometMode");
 const variantMode = document.getElementById("variantMode");
+const controlEditor = document.getElementById("controlEditor");
+const resetControls = document.getElementById("resetControls");
 
 const TAU = Math.PI * 2;
 const WORLD = { w: 1280, h: 800 };
@@ -25,7 +27,14 @@ const STAR = { x: WORLD.w / 2, y: WORLD.h / 2, radius: 34, gravity: 90000 };
 const KING_RING = { inner: 86, outer: 170 };
 const keys = new Set();
 
-const controlSets = [
+const actions = [
+  { id: "left", label: "LEFT" },
+  { id: "right", label: "RIGHT" },
+  { id: "thrust", label: "THRUST" },
+  { id: "fire", label: "FIRE" }
+];
+
+const defaultControlSets = [
   { left: "KeyA", right: "KeyD", thrust: "KeyW", fire: "KeyS" },
   { left: "KeyJ", right: "KeyL", thrust: "KeyI", fire: "KeyK" },
   { left: "KeyF", right: "KeyH", thrust: "KeyT", fire: "KeyG" },
@@ -33,6 +42,8 @@ const controlSets = [
   { left: "Numpad4", right: "Numpad6", thrust: "Numpad8", fire: "Numpad5" },
   { left: "KeyV", right: "KeyN", thrust: "KeyY", fire: "KeyB" }
 ];
+
+let controlSets = cloneControlSets(defaultControlSets);
 
 const hulls = [
   [[14, 0], [-12, -9], [-7, 0], [-12, 9]],
@@ -69,6 +80,11 @@ let options = {};
 let teamScores = [0, 0];
 let roundScored = false;
 let cometTimer = 6;
+let pendingBind = null;
+
+function cloneControlSets(sets) {
+  return sets.map((set) => ({ ...set }));
+}
 
 function seededStars() {
   let seed = 19462;
@@ -193,6 +209,62 @@ function renderScores() {
     const trait = options.variants ? ` ${p.trait.label}` : "";
     return `<div class="score"><span>${p.name}${team}${tag}${trait}</span><strong>${p.score}${fuel}</strong></div>`;
   }).join("");
+}
+
+function renderControlEditor() {
+  const count = Number(playerCount.value);
+  controlEditor.innerHTML = "";
+  for (let player = 0; player < count; player++) {
+    const row = document.createElement("div");
+    row.className = "control-row";
+    const name = document.createElement("span");
+    name.textContent = `P${player + 1}`;
+    row.append(name);
+    for (const action of actions) {
+      const button = document.createElement("button");
+      button.className = "bind-button";
+      button.type = "button";
+      button.dataset.player = String(player);
+      button.dataset.action = action.id;
+      button.title = `${name.textContent} ${action.label}`;
+      button.textContent = pendingBind && pendingBind.player === player && pendingBind.action === action.id
+        ? "PRESS"
+        : `${action.label} ${keyLabel(controlSets[player][action.id])}`;
+      if (button.textContent === "PRESS") button.classList.add("waiting");
+      row.append(button);
+    }
+    controlEditor.append(row);
+  }
+}
+
+function keyLabel(code) {
+  if (!code) return "---";
+  const labels = {
+    ArrowLeft: "LEFT",
+    ArrowRight: "RIGHT",
+    ArrowUp: "UP",
+    ArrowDown: "DOWN",
+    Space: "SPACE",
+    Enter: "ENTER",
+    Escape: "ESC"
+  };
+  if (labels[code]) return labels[code];
+  if (code.startsWith("Key")) return code.slice(3);
+  if (code.startsWith("Digit")) return code.slice(5);
+  if (code.startsWith("Numpad")) return `N${code.slice(6)}`;
+  return code.replace(/^(Shift|Control|Alt)/, "");
+}
+
+function setControlBinding(player, action, code) {
+  for (const set of controlSets) {
+    for (const candidate of actions) {
+      if (set[candidate.id] === code) set[candidate.id] = "";
+    }
+  }
+  controlSets[player][action] = code;
+  keys.delete(code);
+  pendingBind = null;
+  renderControlEditor();
 }
 
 function update(dt) {
@@ -712,10 +784,25 @@ function resizeCanvas() {
 }
 
 window.addEventListener("keydown", (event) => {
+  if (pendingBind) {
+    event.preventDefault();
+    if (event.code === "Escape") {
+      pendingBind = null;
+      renderControlEditor();
+      return;
+    }
+    if (!["Enter", "Space", "Tab"].includes(event.code)) {
+      setControlBinding(pendingBind.player, pendingBind.action, event.code);
+    }
+    return;
+  }
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(event.code)) event.preventDefault();
   keys.add(event.code);
   if (event.code === "Enter" && betweenRounds && roundTimer > 900000) resetMatch();
-  if (event.code === "Escape" && !dialog.open) dialog.showModal();
+  if (event.code === "Escape" && !dialog.open) {
+    keys.clear();
+    dialog.showModal();
+  }
   if (event.code === "Space") {
     paused = !paused;
     pauseButton.textContent = paused ? ">" : "II";
@@ -726,6 +813,23 @@ window.addEventListener("keyup", (event) => {
   keys.delete(event.code);
 });
 
+controlEditor.addEventListener("click", (event) => {
+  const button = event.target.closest(".bind-button");
+  if (!button) return;
+  pendingBind = {
+    player: Number(button.dataset.player),
+    action: button.dataset.action
+  };
+  renderControlEditor();
+});
+
+resetControls.addEventListener("click", () => {
+  controlSets = cloneControlSets(defaultControlSets);
+  pendingBind = null;
+  keys.clear();
+  renderControlEditor();
+});
+
 pauseButton.addEventListener("click", () => {
   paused = !paused;
   pauseButton.textContent = paused ? ">" : "II";
@@ -733,6 +837,8 @@ pauseButton.addEventListener("click", () => {
 
 playerCount.addEventListener("input", () => {
   playerCountOut.value = playerCount.value;
+  pendingBind = null;
+  renderControlEditor();
 });
 
 gravity.addEventListener("input", () => {
@@ -753,6 +859,7 @@ seededStars();
 resizeCanvas();
 options = readOptions();
 renderScores();
+renderControlEditor();
 if (typeof dialog.showModal === "function") {
   dialog.showModal();
 } else {
