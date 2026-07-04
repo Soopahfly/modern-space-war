@@ -1,6 +1,6 @@
 {
   "name": "modern-space-war",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A monochrome multiplayer Spacewar-inspired browser and desktop game.",
   "private": true,
   "main": "electron/main.js",

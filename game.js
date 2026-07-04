@@ -49,6 +49,9 @@ const TAU = Math.PI * 2;
 const WORLD = { w: 1280, h: 800 };
 const STAR = { x: WORLD.w / 2, y: WORLD.h / 2, radius: 34, gravity: 90000 };
 const KING_RING = { inner: 86, outer: 170 };
+const STAR_GRAVITY_SCALE = 90000;
+const GRAVITY_SOFTENING = 64;
+const MAX_GRAVITY_ACCEL = 980;
 const keys = new Set();
 
 const actions = [
@@ -172,7 +175,7 @@ function resetMatch() {
   const count = Number(playerCount.value);
   options = readOptions();
   targetScore = clamp(Number(scoreLimit.value) || 7, 1, 25);
-  STAR.gravity = Number(gravity.value) * 1450;
+  STAR.gravity = starGravityFromSlider();
   teamScores = [0, 0];
   players = Array.from({ length: count }, (_, i) => makePlayer(i, count));
   configureBots(count);
@@ -244,11 +247,12 @@ function spawnFor(index, count) {
   const radiusMap = { close: 0.24, mid: 0.36, far: 0.46 };
   const mix = [0.24, 0.36, 0.46][index % 3];
   const radius = base * (options.orbit === "mixed" ? mix : radiusMap[options.orbit] || 0.36);
+  const orbitalSpeed = Math.sqrt(Math.max(STAR.gravity, 1) / radius) * 0.48;
   return {
     x: STAR.x + Math.cos(angle) * radius,
     y: STAR.y + Math.sin(angle) * radius,
-    vx: Math.sin(angle) * 28,
-    vy: -Math.cos(angle) * 28,
+    vx: Math.sin(angle) * orbitalSpeed,
+    vy: -Math.cos(angle) * orbitalSpeed,
     angle: angle + Math.PI
   };
 }
@@ -523,7 +527,7 @@ function updateAttract(dt) {
   playerCount.value = String(Math.max(Number(playerCount.value), options.bots));
   playerCountOut.value = playerCount.value;
   targetScore = 7;
-  STAR.gravity = Number(gravity.value) * 1450;
+  STAR.gravity = starGravityFromSlider();
   teamScores = [0, 0];
   players = Array.from({ length: Number(playerCount.value) }, (_, i) => makePlayer(i, Number(playerCount.value)));
   configureBots(players.length);
@@ -861,9 +865,10 @@ function applyGravityBodies(body, dt) {
 function applyBodyGravity(body, x, y, gravityStrength, dt) {
   const dx = x - body.x;
   const dy = y - body.y;
-  const d2 = Math.max(dx * dx + dy * dy, 1600);
-  const d = Math.sqrt(d2);
-  const pull = gravityStrength / d2;
+  const d2 = dx * dx + dy * dy;
+  const d = Math.max(Math.sqrt(d2), 1);
+  const softened = d2 + GRAVITY_SOFTENING * GRAVITY_SOFTENING;
+  const pull = Math.min(MAX_GRAVITY_ACCEL, gravityStrength / softened);
   body.vx += (dx / d) * pull * dt;
   body.vy += (dy / d) * pull * dt;
 }
@@ -904,7 +909,6 @@ function updateComet(dt) {
 
 function updateShots(dt) {
   for (const s of shots) {
-    applyGravityBodies(s, dt);
     s.x += s.vx * dt;
     s.y += s.vy * dt;
     s.life -= dt;
@@ -1288,6 +1292,10 @@ function wrap(body) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function starGravityFromSlider() {
+  return Math.max(0, Number(gravity.value)) * STAR_GRAVITY_SCALE;
 }
 
 function frame(now) {

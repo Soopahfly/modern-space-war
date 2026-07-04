@@ -2,6 +2,8 @@
 
 A local browser version of the classic Spacewar idea: monochrome vector ships, a central gravity star, wraparound space, missiles, and support for 2-6 local players.
 
+The central star is an active gravity well. Ships spawn with sideways drift, can slingshot around the star, and are destroyed if they fall into it. Torpedoes fly straight, matching the original Spacewar feel.
+
 Open `index.html` in a modern browser. No build step is required.
 
 The static game can also be deployed through GitHub Pages. The included Pages workflow publishes the browser files on every push to `master`. Online room play needs the Node server below because GitHub Pages cannot host WebSockets for this game.
