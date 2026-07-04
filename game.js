@@ -21,6 +21,7 @@ const variantMode = document.getElementById("variantMode");
 const controlEditor = document.getElementById("controlEditor");
 const gamepadEditor = document.getElementById("gamepadEditor");
 const gamepadStatus = document.getElementById("gamepadStatus");
+const mouseEditor = document.getElementById("mouseEditor");
 const resetControls = document.getElementById("resetControls");
 
 const TAU = Math.PI * 2;
@@ -85,6 +86,9 @@ let cometTimer = 6;
 let pendingBind = null;
 let pendingPadBind = null;
 let playerPads = Array(6).fill(null);
+let mousePlayer = null;
+let mouseTurn = 0;
+let mouseButtons = 0;
 
 function cloneControlSets(sets) {
   return sets.map((set) => ({ ...set }));
@@ -136,6 +140,7 @@ function resetMatch() {
   paused = false;
   pauseButton.textContent = "II";
   renderScores();
+  if (mousePlayer !== null && canvas.requestPointerLock) canvas.requestPointerLock();
 }
 
 function makePlayer(index, count) {
@@ -322,7 +327,7 @@ function readPadInput(player, action) {
 
 function actionActive(player, action) {
   const controls = controlSets[player];
-  return keys.has(controls[action]) || readPadInput(player, action);
+  return keys.has(controls[action]) || readPadInput(player, action) || readMouseInput(player, action);
 }
 
 function axis(pad, index) {
@@ -354,6 +359,26 @@ function processGamepadAssignment() {
   renderGamepadEditor();
 }
 
+function renderMouseEditor() {
+  const count = Number(playerCount.value);
+  mouseEditor.innerHTML = "";
+  for (let player = 0; player < count; player++) {
+    const button = document.createElement("button");
+    button.className = "mouse-button";
+    button.type = "button";
+    button.dataset.player = String(player);
+    button.textContent = mousePlayer === player ? `P${player + 1} MOUSE ON` : `P${player + 1} MOUSE ---`;
+    mouseEditor.append(button);
+  }
+}
+
+function readMouseInput(player, action) {
+  if (mousePlayer !== player || document.pointerLockElement !== canvas) return false;
+  if (action === "thrust") return Boolean(mouseButtons & 1);
+  if (action === "fire") return Boolean(mouseButtons & 2);
+  return false;
+}
+
 function update(dt) {
   if (!started) {
     stateNode.textContent = "READY";
@@ -374,6 +399,7 @@ function update(dt) {
   updateMoons(dt);
   updateComet(dt);
   for (const p of players) updatePlayer(p, dt);
+  mouseTurn = 0;
   updateShots(dt);
   updateDebris(dt);
   updateSparks(dt);
@@ -391,6 +417,9 @@ function modeLabel() {
 
 function updatePlayer(p, dt) {
   if (!p.alive) return;
+  if (mousePlayer === p.id && document.pointerLockElement === canvas) {
+    p.angle += mouseTurn * 0.014 * p.trait.turn;
+  }
   if (actionActive(p.id, "left")) p.angle -= 4.25 * p.trait.turn * dt;
   if (actionActive(p.id, "right")) p.angle += 4.25 * p.trait.turn * dt;
   if (actionActive(p.id, "thrust") && (!options.fuel || p.fuel > 0)) {
@@ -923,14 +952,28 @@ gamepadEditor.addEventListener("click", (event) => {
   renderGamepadEditor();
 });
 
+mouseEditor.addEventListener("click", (event) => {
+  const button = event.target.closest(".mouse-button");
+  if (!button) return;
+  const player = Number(button.dataset.player);
+  mousePlayer = mousePlayer === player ? null : player;
+  mouseTurn = 0;
+  mouseButtons = 0;
+  renderMouseEditor();
+});
+
 resetControls.addEventListener("click", () => {
   controlSets = cloneControlSets(defaultControlSets);
   pendingBind = null;
   pendingPadBind = null;
   playerPads = Array(6).fill(null);
+  mousePlayer = null;
+  mouseTurn = 0;
+  mouseButtons = 0;
   keys.clear();
   renderControlEditor();
   renderGamepadEditor();
+  renderMouseEditor();
 });
 
 pauseButton.addEventListener("click", () => {
@@ -942,8 +985,10 @@ playerCount.addEventListener("input", () => {
   playerCountOut.value = playerCount.value;
   pendingBind = null;
   pendingPadBind = null;
+  if (mousePlayer !== null && mousePlayer >= Number(playerCount.value)) mousePlayer = null;
   renderControlEditor();
   renderGamepadEditor();
+  renderMouseEditor();
 });
 
 gravity.addEventListener("input", () => {
@@ -970,12 +1015,38 @@ window.addEventListener("gamepaddisconnected", (event) => {
   renderGamepadEditor();
 });
 
+window.addEventListener("mousemove", (event) => {
+  if (document.pointerLockElement === canvas) mouseTurn += event.movementX;
+});
+
+window.addEventListener("mousedown", (event) => {
+  if (document.pointerLockElement !== canvas) return;
+  mouseButtons = event.buttons;
+  event.preventDefault();
+});
+
+window.addEventListener("mouseup", (event) => {
+  mouseButtons = event.buttons;
+});
+
+canvas.addEventListener("contextmenu", (event) => {
+  if (mousePlayer !== null) event.preventDefault();
+});
+
+document.addEventListener("pointerlockchange", () => {
+  if (document.pointerLockElement !== canvas) {
+    mouseButtons = 0;
+    mouseTurn = 0;
+  }
+});
+
 seededStars();
 resizeCanvas();
 options = readOptions();
 renderScores();
 renderControlEditor();
 renderGamepadEditor();
+renderMouseEditor();
 if (typeof dialog.showModal === "function") {
   dialog.showModal();
 } else {

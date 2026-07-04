@@ -8,6 +8,8 @@ Controls are shown on the start screen. Each player has rotate left, rotate righ
 
 Gamepads and joysticks are supported through the browser Gamepad API. Click a player's `PAD` button on the setup screen, then move a stick or press a button on the controller to assign it. Left stick or D-pad left/right rotates, A / left trigger / right trigger / D-pad up thrusts, and B / X / right bumper / D-pad down fires.
 
+Mouse and spinner-style controls are also supported. Click a player's `MOUSE` button before starting. During the match, the browser locks the pointer to the canvas: horizontal movement rotates the ship, left mouse thrusts, and right mouse fires. A USB spinner that appears as mouse movement should work as rotation input.
+
 Modes:
 
 - Free-for-all: classic last-ship and kill scoring.
