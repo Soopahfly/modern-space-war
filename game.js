@@ -54,6 +54,8 @@ const KING_RING = { inner: 86, outer: 170 };
 const STAR_GRAVITY_SCALE = 90000;
 const GRAVITY_SOFTENING = 64;
 const MAX_GRAVITY_ACCEL = 980;
+const STAR_RADIUS_RANGE = { min: 22, max: 52 };
+const ANTI_GRAVITY_CHANCE = 0.18;
 const keys = new Set();
 
 const actions = [
@@ -117,6 +119,7 @@ let options = {};
 let teamScores = [0, 0];
 let roundScored = false;
 let cometTimer = 6;
+let arenaRoll = makeArenaRoll();
 let pendingBind = null;
 let pendingPadBind = null;
 let playerPads = Array(6).fill(null);
@@ -144,6 +147,17 @@ let thrustSoundTimer = 0;
 
 function blankInput() {
   return { left: false, right: false, thrust: false, fire: false, mouseTurn: 0 };
+}
+
+function makeArenaRoll() {
+  return {
+    spawnOffset: Math.random() * TAU,
+    spawnJitter: Array.from({ length: 6 }, () => (Math.random() - 0.5) * 0.38),
+    radiusJitter: Array.from({ length: 6 }, () => 0.88 + Math.random() * 0.28),
+    gravityFactor: 0.72 + Math.random() * 0.72,
+    antiGravity: Math.random() < ANTI_GRAVITY_CHANCE,
+    starRadius: STAR_RADIUS_RANGE.min + Math.random() * (STAR_RADIUS_RANGE.max - STAR_RADIUS_RANGE.min)
+  };
 }
 
 function makeBotState() {
@@ -199,7 +213,7 @@ function resetMatch() {
   const count = Number(playerCount.value);
   options = readOptions();
   targetScore = clamp(Number(scoreLimit.value) || 7, 1, 25);
-  STAR.gravity = starGravityFromSlider();
+  randomizeArena();
   teamScores = [0, 0];
   players = Array.from({ length: count }, (_, i) => makePlayer(i, count));
   configureBots(count);
@@ -218,6 +232,12 @@ function resetMatch() {
   renderScores();
   playTone(150, 0.05, 0.04);
   if (mousePlayer !== null && canvas.requestPointerLock) canvas.requestPointerLock();
+}
+
+function randomizeArena() {
+  arenaRoll = makeArenaRoll();
+  STAR.radius = arenaRoll.starRadius;
+  STAR.gravity = starGravityFromSlider() * arenaRoll.gravityFactor * (arenaRoll.antiGravity ? -1 : 1);
 }
 
 function configureBots(count) {
@@ -267,12 +287,13 @@ function spawnRound() {
 }
 
 function spawnFor(index, count) {
-  const angle = (index / count) * TAU - Math.PI / 2;
+  const angle = arenaRoll.spawnOffset + (index / count) * TAU + (arenaRoll.spawnJitter[index] || 0);
   const base = Math.min(WORLD.w, WORLD.h);
   const radiusMap = { close: 0.24, mid: 0.36, far: 0.46 };
   const mix = [0.24, 0.36, 0.46][index % 3];
-  const radius = base * (options.orbit === "mixed" ? mix : radiusMap[options.orbit] || 0.36);
-  const orbitalSpeed = Math.sqrt(Math.max(STAR.gravity, 1) / radius) * 0.48;
+  const radius = base * (options.orbit === "mixed" ? mix : radiusMap[options.orbit] || 0.36) * (arenaRoll.radiusJitter[index] || 1);
+  const orbitDirection = arenaRoll.antiGravity ? -1 : 1;
+  const orbitalSpeed = Math.sqrt(Math.max(Math.abs(STAR.gravity), 1) / radius) * 0.48 * orbitDirection;
   return {
     x: STAR.x + Math.cos(angle) * radius,
     y: STAR.y + Math.sin(angle) * radius,
@@ -643,7 +664,7 @@ function updateAttract(dt) {
   playerCount.value = String(Math.max(Number(playerCount.value), options.bots));
   playerCountOut.value = playerCount.value;
   targetScore = 7;
-  STAR.gravity = starGravityFromSlider();
+  randomizeArena();
   teamScores = [0, 0];
   players = Array.from({ length: Number(playerCount.value) }, (_, i) => makePlayer(i, Number(playerCount.value)));
   configureBots(players.length);
@@ -863,7 +884,9 @@ function snapshotState() {
     teamScores,
     roundScored,
     cometTimer,
+    arenaRoll,
     starGravity: STAR.gravity,
+    starRadius: STAR.radius,
     stateText: stateNode.textContent
   };
 }
@@ -883,7 +906,9 @@ function applySnapshot(state) {
   teamScores = state.teamScores || [0, 0];
   roundScored = state.roundScored;
   cometTimer = state.cometTimer;
-  STAR.gravity = state.starGravity || STAR.gravity;
+  arenaRoll = state.arenaRoll || arenaRoll;
+  STAR.gravity = state.starGravity ?? STAR.gravity;
+  STAR.radius = state.starRadius ?? STAR.radius;
   stateNode.textContent = state.stateText || "ONLINE";
   renderScores();
 }
@@ -922,10 +947,11 @@ function update(dt) {
 }
 
 function modeLabel() {
-  if (options.mode === "teams") return "TEAMS";
-  if (options.mode === "bounty") return "BOUNTY";
-  if (options.mode === "king") return "KING";
-  return "LIVE";
+  const arena = arenaRoll.antiGravity ? " ANTI" : "";
+  if (options.mode === "teams") return `TEAMS${arena}`;
+  if (options.mode === "bounty") return `BOUNTY${arena}`;
+  if (options.mode === "king") return `KING${arena}`;
+  return `LIVE${arena}`;
 }
 
 function updatePlayer(p, dt) {
